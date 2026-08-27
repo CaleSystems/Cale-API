@@ -6,23 +6,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 2 onward of that plan) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
-**Status (2026-08-28): skeleton only.** Module folders exist as empty Nest modules; no schema, no auth, no endpoints beyond the CLI-generated `GET /` yet. Do not assume any of the stack below is wired up — check the actual module contents before relying on this doc's description of intended shape.
+**Status (2026-08-28): infra live, no domain code yet.** Module folders (`identity`, `catalog`, `commerce`, `inventory`, `ops`, `platform`) are still empty Nest modules — no schema, no auth, no domain endpoints. What *is* real: the app is deployed and reachable, with a live DB connection and a working health check. Don't assume any domain logic exists — check actual module contents before relying on this doc's description of intended shape.
+
+**Live infra:**
+- Deployed on Render (`calesystems-api`, Starter plan, Oregon) from this repo's `main` branch, auto-deploy on push.
+- Reachable at `https://api.calecorp.com` (custom domain, DNS-only Cloudflare CNAME → `calesystems-api.onrender.com`, TLS via Render) and `https://calesystems-api.onrender.com`.
+- `GET /health` returns `{"status":"ok","db":"up"}` — real query against the Neon Postgres instance (DB `CaleSystem`).
+- Neon Postgres, Cloudflare R2 bucket `cale-storage` (unused by code yet), Sentry org `xeazharr` with 4 projects created (only `cale-api`'s DSN is wired into this repo's `.env`; `calepos-web`/`-electron`/`-android` DSNs exist in Sentry but aren't in `pos-frontend` yet — no SDK installed there).
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
 | Framework | NestJS + TypeScript |
-| HTTP adapter | Fastify (`@nestjs/platform-fastify` installed, not yet wired into `main.ts`) |
-| API | REST, intended at `/api/v1`, OpenAPI/Swagger (`@nestjs/swagger` installed) |
-| Database | Standalone PostgreSQL, schemas per domain, hosted on Neon (not yet provisioned) |
-| ORM | Drizzle (`drizzle-orm` + `drizzle-kit` installed, no schema written yet) |
+| HTTP adapter | Fastify (wired in `main.ts`, swapped from the CLI's default Express) |
+| API | REST, intended at `/api/v1` (not yet prefixed), OpenAPI/Swagger (`@nestjs/swagger` installed, not yet wired) |
+| Database | Standalone PostgreSQL, schemas per domain, hosted on Neon — **provisioned and connected**, no schema/tables beyond Neon's defaults yet |
+| ORM | Drizzle (`drizzle-orm` + `drizzle-kit` installed, no schema written yet — current DB access is a raw `pg.Pool` for the health check only, see `src/db/pg-pool.provider.ts`) |
 | Auth | In-house — `@nestjs/passport` + `@nestjs/jwt` wrapping argon2id hashing, Postgres-tracked sessions (not yet implemented) |
-| Validation | `class-validator` + `class-transformer`, global `ValidationPipe` (not yet wired) |
-| Rate limiting | `@nestjs/throttler` (installed, not yet wired) |
-| Testing | Jest (unit) + Nest's e2e runner + `supertest` |
+| Validation | `class-validator` + `class-transformer`, global `ValidationPipe({ whitelist: true, transform: true })` — **wired** in `main.ts` |
+| Rate limiting | `@nestjs/throttler`, global `APP_GUARD` (60 req/min, not yet scoped to specific auth/sync routes since none exist) — **wired** in `app.module.ts` |
+| Config | `@nestjs/config` (`ConfigModule.forRoot({ isGlobal: true })`) loading `.env` — added during the `main.ts` wiring pass, not in the original dependency list |
+| Testing | Jest (unit) + Nest's e2e runner + `supertest` — e2e now includes a real `/health` round-trip against the live Neon DB, not mocked |
 | Background jobs | `pg-boss` (installed, not yet used) |
-| Object storage | Cloudflare R2 via `@aws-sdk/client-s3` (installed, not yet used) |
+| Object storage | Cloudflare R2 via `@aws-sdk/client-s3` (bucket `cale-storage` created, not yet wired into code) |
+| Error tracking | Sentry project `cale-api` created, DSN in `.env`/`.env.example` as `SENTRY_DSN` — **SDK not installed/wired yet** |
 
 ## Commands
 
@@ -35,7 +43,7 @@ npm run test:e2e     # e2e tests (Nest + supertest)
 npm run lint           # ESLint
 ```
 
-No database is configured yet — none of the modules currently touch Postgres, so these commands work with no external services running.
+`DATABASE_URL` (Neon connection string) must be set in `.env` — copy `.env.example` and fill it in, or these commands (and `GET /health`) will fail/return `db: down`. See `.env.example` for `SENTRY_DSN` too (unused by code today).
 
 ## Architecture
 
@@ -56,6 +64,10 @@ src/
 ## Versioning
 
 Not yet decided for this repo — `pos-frontend`'s MAJOR/MINOR-only convention (see its `CLAUDE.md`) is the likely starting point once this ships anything with external behavior, but that hasn't been confirmed for `cale-api` yet. Don't assume it applies here until this section is updated.
+
+## Next steps
+
+Phase 2 of `PLATFORM_SETUP.md` is fully done (repos, accounts, `main.ts` wiring). Next up is Phase 3 — "Build the replacement": snapshot Supabase to a working copy, then write the Drizzle schema module-by-module (`PLATFORM_SETUP.md` 3.2), followed by the auth port (3.3) and porting `pos-frontend/src/lib/api.js` (3.4). Read `PLATFORM_SETUP.md` Phase 3 in full before starting — it has the exact schema/role/RLS-equivalent pattern this repo needs to follow.
 
 ## Security & Fiscal Changes
 
