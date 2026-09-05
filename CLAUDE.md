@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 2 onward of that plan) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
+`cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
 **Status (2026-08-28): infra live, no domain code yet.** Module folders (`identity`, `catalog`, `commerce`, `inventory`, `ops`, `platform`) are still empty Nest modules — no schema, no auth, no domain endpoints. What *is* real: the app is deployed and reachable, with a live DB connection and a working health check. Don't assume any domain logic exists — check actual module contents before relying on this doc's description of intended shape.
 
@@ -65,7 +65,7 @@ src/
   app.module.ts
 ```
 
-**Layering rule:** controllers → module services → Drizzle repositories. A module only ever touches its own tables. Cross-module interaction happens through that module's own service/API layer or outbox events — never a direct query into another module's schema. Once schemas exist, this is enforced two ways: code convention (repository layer) and a distinct Postgres role per module granted only on its own schema — see `PLATFORM_SETUP.md` section 3.2 for the exact `CREATE ROLE`/`GRANT` pattern. A code-review miss should never become a runtime hole.
+**Layering rule:** controllers → module services → Drizzle repositories. A module only ever touches its own tables. Cross-module interaction happens through that module's own service/API layer or outbox events — never a direct query into another module's schema. Once schemas exist, this is enforced two ways: code convention (repository layer) and a distinct Postgres role per module granted only on its own schema — see `PLATFORM_SETUP.md` section 6, "Phase 2 — POS parity" for the exact `CREATE ROLE`/`GRANT` pattern. A code-review miss should never become a runtime hole.
 
 ## Versioning
 
@@ -73,7 +73,9 @@ Not yet decided for this repo — `POS/client`'s MAJOR/MINOR-only convention (se
 
 ## Next steps
 
-Phase 2 of `PLATFORM_SETUP.md` is fully done (repos, accounts, `main.ts` wiring). Next up is Phase 3 — "Build the replacement": snapshot Supabase to a working copy, then write the Drizzle schema module-by-module (`PLATFORM_SETUP.md` 3.2), followed by the auth port (3.3) and porting `client/src/lib/api.js` (3.4). Read `PLATFORM_SETUP.md` Phase 3 in full before starting — it has the exact schema/role/RLS-equivalent pattern this repo needs to follow.
+**Correction (2026-09-05):** this section previously mislabeled the phases — the work done so far (repos/accounts, `main.ts` wiring) is `PLATFORM_SETUP.md` **Phase 1**'s checklist, not Phase 2, and there is no "section 3.2"/"3.3"/"3.4" in that document.
+
+Phase 1 — Foundations (repos, accounts, `main.ts` wiring, CI skeleton) is done for the parts that don't require a monorepo/RLS harness yet. Next up is **Phase 2 — POS parity**: snapshot Supabase to a working copy, then write the Drizzle schema module-by-module (identity first, commerce last), reproducing every RLS policy and the per-module Postgres role/grant pattern, followed by the auth port (argon2id + JWT + sessions table) and porting `client/src/lib/api.js` function-by-function. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting — it has the exact schema/role/RLS-equivalent pattern this repo needs to follow.
 
 ## Security & Fiscal Changes
 
@@ -81,6 +83,6 @@ Canonical list (mirrors `POS/client/CLAUDE.md`): authentication, authorization, 
 
 None of these exist as real code in this repo yet. Once they do:
 - Treat the database/RLS layer as the security boundary, same as the Supabase-backed app did.
-- `SET LOCAL app.current_branch_id` / `app.current_staff_id` must only ever be set inside an explicit transaction on a single connection — see `PLATFORM_SETUP.md` section 3.2, "`SET LOCAL` correctness", for why a bare pooled query is a real cross-branch leak, not a theoretical one.
+- `SET LOCAL app.current_branch_id` / `app.current_staff_id` must only ever be set inside an explicit transaction on a single connection — see `PLATFORM_SETUP.md` section 4, "FIX-3 — Make the three security layers debuggable" ("`SET LOCAL` correctness"), for why a bare pooled query is a real cross-branch leak, not a theoretical one.
 - A request with no branch context set must be denied, not default-allowed.
 - Don't weaken an existing security or fiscal control merely to make a feature easier to implement.
