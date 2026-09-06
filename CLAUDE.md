@@ -75,7 +75,30 @@ Not yet decided for this repo — `POS/client`'s MAJOR/MINOR-only convention (se
 
 **Correction (2026-09-05):** this section previously mislabeled the phases — the work done so far (repos/accounts, `main.ts` wiring) is `PLATFORM_SETUP.md` **Phase 1**'s checklist, not Phase 2, and there is no "section 3.2"/"3.3"/"3.4" in that document.
 
-Phase 1 — Foundations (repos, accounts, `main.ts` wiring, CI skeleton) is done for the parts that don't require a monorepo/RLS harness yet. Next up is **Phase 2 — POS parity**, now split into four shippable slices (2a identity+auth → 2b catalog/inventory reads → 2c commerce/fiscal → 2d ops/reporting), each ending in a rehearsal. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting.
+**Phase 1 is NOT done (re-checked 2026-09-06).** It was rewritten into four groups because the
+old version could be marked complete while none of its real deliverables existed:
+
+| Group | What | Status |
+|---|---|---|
+| 1a | Accounts & deploy surface | done — Render, Neon, R2, Sentry, `api.calecorp.com` all live |
+| 1b | API skeleton | partly — builds/deploys/health check work; no `/api/v1` prefix, no `/health/deep`, no `docker-compose.yml`, no `drizzle.config.ts` |
+| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **not started** |
+| 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | **not started** — this repo has no `.github/` at all, so Render auto-deploys `main` with nothing gating it |
+
+**Do not start Phase 2 until 1c and 1d are done**, and read `PLATFORM_SETUP.md`'s
+"Exit criteria — when Phase 1 is actually done". Phase 2 consumes both: the RLS harness is what
+makes porting 64 policies and 103 `SECURITY DEFINER` functions verifiable, and `@cale/contracts`
+must exist *before* `src/lib/api/` is ported — extracting it afterwards is a rewrite.
+
+Two items in 1b have no visible symptom today and get expensive later:
+
+- **`app.setGlobalPrefix('api/v1')`** — one line now. One of the platform's clients is an
+  installed APK on a register that may be offline for days, so once a second client exists there
+  is no way to ship a breaking change without a version to hang it on.
+- **Throttler tiers** — the global 60 req/min `APP_GUARD` is a correct floor but the only tier;
+  auth and sync routes need their own, tighter limits.
+
+Phase 2 — POS parity is then split into four shippable slices (2a identity+auth → 2b catalog/inventory reads → 2c commerce/fiscal → 2d ops/reporting), each ending in a rehearsal. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting.
 
 **What Phase 2 actually is, measured (2026-09-06):** 31 tables, 64 RLS policies, 115 Postgres functions (74 called directly by the frontend), 21 triggers, and 232 exported functions (~9,100 LOC) in `../POS/pos-frontend/src/lib/api/`.
 
