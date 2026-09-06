@@ -17,7 +17,7 @@ the local folder is still named `POS`, that hasn't been renamed to match) and th
 **Live infra:**
 - Deployed on Render (`calesystems-api`, Starter plan, Oregon) from this repo's `main` branch (`CaleSystems/Cale-API`), auto-deploy on push.
 - Reachable at `https://api.calecorp.com` (custom domain, DNS-only Cloudflare CNAME → `calesystems-api.onrender.com`, TLS via Render) and `https://calesystems-api.onrender.com`.
-- `GET /health` returns `{"status":"ok","db":"up"}` — real query against the Neon Postgres instance (DB `CaleSystem`).
+- `GET /health` returns `{"status":"ok","db":"up"}` — real query against the Neon Postgres instance (DB `CaleSystem`). `GET /health/deep` adds per-dependency detail (DB latency; R2 and outbox report `not_configured` until wired, which never fails the check).
 - Neon Postgres, Cloudflare R2 bucket `cale-storage` (unused by code yet), Sentry org `xeazharr` with 4 projects created (only `cale-api`'s DSN is wired into this repo's `.env`; `calepos-web`/`-electron`/`-android` DSNs exist in Sentry but aren't in Cale-POS's frontend yet — no SDK installed there). **Path note (2026-09-06):** that frontend is `../POS/pos-frontend` on `main`; the rename to `client` exists only on the stale `platform` branch, so don't go looking for `../POS/client`.
 
 ## Stack
@@ -26,12 +26,12 @@ the local folder is still named `POS`, that hasn't been renamed to match) and th
 |---|---|
 | Framework | NestJS + TypeScript |
 | HTTP adapter | Fastify (wired in `main.ts`, swapped from the CLI's default Express) |
-| API | REST, intended at `/api/v1` (not yet prefixed), OpenAPI/Swagger (`@nestjs/swagger` installed, not yet wired) |
+| API | REST at `/api/v1` (`setGlobalPrefix` in `src/bootstrap.ts`; `/health` and `/health/deep` are deliberately excluded so Render's probe keeps working), OpenAPI/Swagger (`@nestjs/swagger` installed, not yet wired) |
 | Database | Standalone PostgreSQL, schemas per domain, hosted on Neon — **provisioned and connected**, no schema/tables beyond Neon's defaults yet |
 | ORM | Drizzle (`drizzle-orm` + `drizzle-kit` installed, no schema written yet — current DB access is a raw `pg.Pool` for the health check only, see `src/db/pg-pool.provider.ts`) |
 | Auth | In-house — `@nestjs/passport` + `@nestjs/jwt` wrapping argon2id hashing, Postgres-tracked sessions (not yet implemented) |
 | Validation | `class-validator` + `class-transformer`, global `ValidationPipe({ whitelist: true, transform: true })` — **wired** in `main.ts` |
-| Rate limiting | `@nestjs/throttler`, global `APP_GUARD` (60 req/min, not yet scoped to specific auth/sync routes since none exist) — **wired** in `app.module.ts` |
+| Rate limiting | `@nestjs/throttler`, global `APP_GUARD` (60 req/min) as the floor — **wired** in `app.module.ts`. Stricter tiers for auth (10/min) and sync (120/min) are defined in `src/throttle.tiers.ts` and applied per-route with `@Throttle(...)`; no route uses them yet because no auth/sync routes exist |
 | Config | `@nestjs/config` (`ConfigModule.forRoot({ isGlobal: true })`) loading `.env` — added during the `main.ts` wiring pass, not in the original dependency list |
 | Testing | Jest (unit) + Nest's e2e runner + `supertest` — e2e now includes a real `/health` round-trip against the live Neon DB, not mocked |
 | Background jobs | `pg-boss` (installed, not yet used) |
@@ -81,22 +81,24 @@ old version could be marked complete while none of its real deliverables existed
 | Group | What | Status |
 |---|---|---|
 | 1a | Accounts & deploy surface | done — Render, Neon, R2, Sentry, `api.calecorp.com` all live |
-| 1b | API skeleton | partly — builds/deploys/health check work; no `/api/v1` prefix, no `/health/deep`, no `docker-compose.yml`, no `drizzle.config.ts` |
+| 1b | API skeleton | **done** — `/api/v1` prefix, `/health` + `/health/deep`, `docker-compose.yml`, `drizzle.config.ts`, throttle tiers defined |
 | 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **not started** |
-| 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | **not started** — this repo has no `.github/` at all, so Render auto-deploys `main` with nothing gating it |
+| 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | partly — CI workflow exists (lint → migrate → unit → e2e → build → docker build); RLS harness and a timed restore drill are still missing, and **Render must still be switched off auto-deploy** so the green run is what gates a release |
 
 **Do not start Phase 2 until 1c and 1d are done**, and read `PLATFORM_SETUP.md`'s
 "Exit criteria — when Phase 1 is actually done". Phase 2 consumes both: the RLS harness is what
 makes porting 64 policies and 103 `SECURITY DEFINER` functions verifiable, and `@cale/contracts`
 must exist *before* `src/lib/api/` is ported — extracting it afterwards is a rewrite.
 
-Two items in 1b have no visible symptom today and get expensive later:
+**Two traps found while doing 1b — do not undo either:**
 
-- **`app.setGlobalPrefix('api/v1')`** — one line now. One of the platform's clients is an
-  installed APK on a register that may be offline for days, so once a second client exists there
-  is no way to ship a breaking change without a version to hang it on.
-- **Throttler tiers** — the global 60 req/min `APP_GUARD` is a correct floor but the only tier;
-  auth and sync routes need their own, tighter limits.
+- **`/health` and `/health/deep` are excluded from the global prefix.** Render polls `/health`;
+  moving it under `/api/v1` turns every deploy into a failed one. `test/app.e2e-spec.ts` asserts
+  `/api/v1/health` 404s specifically to catch that regression.
+- **`drizzle.config.ts` is excluded in `tsconfig.build.json`.** A `.ts` file at the repo root
+  widens the TypeScript rootDir, which moves the build output from `dist/main.js` to
+  `dist/src/main.js` and breaks both the Dockerfile's `CMD` and `start:prod`. Any new root-level
+  `.ts` file needs the same exclusion.
 
 Phase 2 — POS parity is then split into four shippable slices (2a identity+auth → 2b catalog/inventory reads → 2c commerce/fiscal → 2d ops/reporting), each ending in a rehearsal. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting.
 

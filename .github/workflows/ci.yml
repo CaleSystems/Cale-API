@@ -1,0 +1,46 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:test@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+
+      # Guarded until a Drizzle schema exists — drizzle-kit fails on an empty
+      # migrations folder, and a red CI nobody can fix gets ignored, which
+      # defeats the point of gating deploys on it. Remove the guard once the
+      # first module schema lands in Phase 2.
+      - name: Run migrations
+        run: |
+          if ls drizzle/*.sql >/dev/null 2>&1; then
+            npx drizzle-kit migrate
+          else
+            echo "No Drizzle migrations yet — skipping."
+          fi
+
+      - run: npm test
+      - run: npm run test:e2e
+      - run: npm run build
+      - run: docker build -t cale-api:${{ github.sha }} .
