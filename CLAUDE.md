@@ -18,7 +18,7 @@ the local folder is still named `POS`, that hasn't been renamed to match) and th
 - Deployed on Render (`calesystems-api`, Starter plan, Oregon) from this repo's `main` branch (`CaleSystems/Cale-API`), auto-deploy on push.
 - Reachable at `https://api.calecorp.com` (custom domain, DNS-only Cloudflare CNAME → `calesystems-api.onrender.com`, TLS via Render) and `https://calesystems-api.onrender.com`.
 - `GET /health` returns `{"status":"ok","db":"up"}` — real query against the Neon Postgres instance (DB `CaleSystem`).
-- Neon Postgres, Cloudflare R2 bucket `cale-storage` (unused by code yet), Sentry org `xeazharr` with 4 projects created (only `cale-api`'s DSN is wired into this repo's `.env`; `calepos-web`/`-electron`/`-android` DSNs exist in Sentry but aren't in `client` (Cale-POS's frontend, in `../POS/client`) yet — no SDK installed there).
+- Neon Postgres, Cloudflare R2 bucket `cale-storage` (unused by code yet), Sentry org `xeazharr` with 4 projects created (only `cale-api`'s DSN is wired into this repo's `.env`; `calepos-web`/`-electron`/`-android` DSNs exist in Sentry but aren't in Cale-POS's frontend yet — no SDK installed there). **Path note (2026-09-06):** that frontend is `../POS/pos-frontend` on `main`; the rename to `client` exists only on the stale `platform` branch, so don't go looking for `../POS/client`.
 
 ## Stack
 
@@ -75,7 +75,13 @@ Not yet decided for this repo — `POS/client`'s MAJOR/MINOR-only convention (se
 
 **Correction (2026-09-05):** this section previously mislabeled the phases — the work done so far (repos/accounts, `main.ts` wiring) is `PLATFORM_SETUP.md` **Phase 1**'s checklist, not Phase 2, and there is no "section 3.2"/"3.3"/"3.4" in that document.
 
-Phase 1 — Foundations (repos, accounts, `main.ts` wiring, CI skeleton) is done for the parts that don't require a monorepo/RLS harness yet. Next up is **Phase 2 — POS parity**: snapshot Supabase to a working copy, then write the Drizzle schema module-by-module (identity first, commerce last), reproducing every RLS policy and the per-module Postgres role/grant pattern, followed by the auth port (argon2id + JWT + sessions table) and porting `client/src/lib/api.js` function-by-function. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting — it has the exact schema/role/RLS-equivalent pattern this repo needs to follow.
+Phase 1 — Foundations (repos, accounts, `main.ts` wiring, CI skeleton) is done for the parts that don't require a monorepo/RLS harness yet. Next up is **Phase 2 — POS parity**, now split into four shippable slices (2a identity+auth → 2b catalog/inventory reads → 2c commerce/fiscal → 2d ops/reporting), each ending in a rehearsal. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting.
+
+**What Phase 2 actually is, measured (2026-09-06):** 31 tables, 64 RLS policies, 115 Postgres functions (74 called directly by the frontend), 21 triggers, and 232 exported functions (~9,100 LOC) in `../POS/pos-frontend/src/lib/api/`.
+
+**Before porting any Postgres function, read the `SECURITY DEFINER` warning in that Phase 2 section.** 103 declarations exist specifically to *bypass* RLS; reproducing the 64 policies does not reproduce their gates. Each one becomes an explicit service-layer authorization check inside an explicit transaction, with a test proving the gate survived — or it becomes a privilege-escalation bug no RLS test will catch.
+
+**Do not redesign invoice numbering during the port.** Port the existing client-generated + `reserve_invoice_number` / `allocate_invoice_number` semantics verbatim; block pre-allocation is explicitly deferred.
 
 ## Security & Fiscal Changes
 
