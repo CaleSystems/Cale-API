@@ -81,7 +81,9 @@ Phase 1 — Foundations (repos, accounts, `main.ts` wiring, CI skeleton) is done
 
 **Before porting any Postgres function, read the `SECURITY DEFINER` warning in that Phase 2 section.** 103 declarations exist specifically to *bypass* RLS; reproducing the 64 policies does not reproduce their gates. Each one becomes an explicit service-layer authorization check inside an explicit transaction, with a test proving the gate survived — or it becomes a privilege-escalation bug no RLS test will catch.
 
-**Do not redesign invoice numbering during the port.** Port the existing client-generated + `reserve_invoice_number` / `allocate_invoice_number` semantics verbatim; block pre-allocation is explicitly deferred.
+**Do not redesign invoice numbering during the port.** Port the existing semantics verbatim. Be precise about what they are: the client does **not** generate the number — it sends `null`, the offline receipt prints `localId` as its reference, and the server assigns the real number atomically at sync via `allocate_invoice_number` (row-locked on `branches.invoice_next`). `reserve_invoice_number` covers the case where a number *is* supplied, and `uq_transactions_branch_invoice` blocks duplicates.
+
+That shipped design is correct about uniqueness but means **an offline sale hands the customer a receipt with no official invoice number** — a live BIR question, not a settled design. It is deferred out of the migration and tracked in `PLATFORM_SETUP.md` under FIX-4 as a pre-go-live decision. Do not resolve it inside the port, and do not record it as solved. Related open question: today's series is per **branch**, while the deferred block design assumes per **register**.
 
 ## Security & Fiscal Changes
 
