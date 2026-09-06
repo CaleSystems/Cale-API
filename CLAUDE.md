@@ -88,7 +88,7 @@ Phase 1 — Foundations (repos, accounts, `main.ts` wiring, CI skeleton) is done
 Canonical list (mirrors `POS/client/CLAUDE.md`): authentication, authorization, RLS, payments, inventory, pricing, refunds, voids, taxes, invoice numbering, audit logs, sales records.
 
 None of these exist as real code in this repo yet. Once they do:
-- Treat the database/RLS layer as the security boundary, same as the Supabase-backed app did.
+- Treat the database/RLS layer as the security boundary, same as the Supabase-backed app did — **but note that RLS was never the whole boundary in the Supabase build.** 103 `SECURITY DEFINER` functions bypass RLS by design and enforce their rules procedurally. Anything ported from one of those needs its gate re-implemented as an explicit service-layer check inside an explicit transaction; the RLS policies alone will not carry it.
 - `SET LOCAL app.current_branch_id` / `app.current_staff_id` must only ever be set inside an explicit transaction on a single connection — see `PLATFORM_SETUP.md` section 4, "FIX-3 — Make the three security layers debuggable" ("`SET LOCAL` correctness"), for why a bare pooled query is a real cross-branch leak, not a theoretical one.
 - A request with no branch context set must be denied, not default-allowed.
 - Don't weaken an existing security or fiscal control merely to make a feature easier to implement.
