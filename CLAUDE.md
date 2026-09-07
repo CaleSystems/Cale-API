@@ -15,9 +15,19 @@ the local folder is still named `POS`, that hasn't been renamed to match) and th
 `.github` profile repo for the full platform repo index.
 
 **Live infra:**
-- Deployed on Render (`calesystems-api`, Starter plan, Oregon) from this repo's `main` branch (`CaleSystems/Cale-API`), auto-deploy on push.
-- Reachable at `https://api.calecorp.com` (custom domain, DNS-only Cloudflare CNAME → `calesystems-api.onrender.com`, TLS via Render) and `https://calesystems-api.onrender.com`.
-- `GET /health` returns `{"status":"ok","db":"up"}` — real query against the Neon Postgres instance (DB `CaleSystem`). `GET /health/deep` adds per-dependency detail (DB latency; R2 and outbox report `not_configured` until wired, which never fails the check).
+- **Render is disabled (2026-09-07).** The API is currently **not deployed anywhere** — do not
+  assume `api.calecorp.com` or `calesystems-api.onrender.com` resolve to a live service. Render
+  was dropped because its Starter-plan compute-hour billing didn't fit a solo operator who wants
+  a flat, predictable cost, not a usage meter.
+- **Hosting direction: a flat-fee VPS** (Hetzner/DigitalOcean/Linode, ~$5-6/mo, provider not yet
+  chosen), running the existing `Dockerfile` directly — no PaaS layer on top. `docker-compose.prod.yml`
+  runs the API container only (Neon Postgres stays managed and off-box). `.github/workflows/ci.yml`'s
+  `deploy` job SSHes in and redeploys on every push to `main`, guarded on `VPS_HOST`/`VPS_SSH_KEY`
+  repo secrets being set — it no-ops with a notice until the box exists and those secrets are added.
+  This was chosen over serverless/scale-to-zero options because `pg-boss` (background jobs, FIX-1)
+  and the planned WebSocket gateway (FIX-2) both need an always-running process; cold starts are
+  also a bad fit for a POS backend where a cashier is waiting mid-sale.
+- `GET /health` returns `{"status":"ok","db":"up"}` — real query against the Neon Postgres instance (DB `CaleSystem`), reachable once the VPS is up. `GET /health/deep` adds per-dependency detail (DB latency; R2 and outbox report `not_configured` until wired, which never fails the check).
 - Neon Postgres, Cloudflare R2 bucket `cale-storage` (unused by code yet), Sentry org `xeazharr` with 4 projects created (only `cale-api`'s DSN is wired into this repo's `.env`; `calepos-web`/`-electron`/`-android` DSNs exist in Sentry but aren't in Cale-POS's frontend yet — no SDK installed there). **Path note (2026-09-06):** that frontend is `../POS/pos-frontend` on `main`; the rename to `client` exists only on the stale `platform` branch, so don't go looking for `../POS/client`.
 
 ## Stack
@@ -80,10 +90,10 @@ old version could be marked complete while none of its real deliverables existed
 
 | Group | What | Status |
 |---|---|---|
-| 1a | Accounts & deploy surface | done — Render, Neon, R2, Sentry, `api.calecorp.com` all live |
+| 1a | Accounts & deploy surface | **partly undone (2026-09-07)** — Neon, R2, Sentry still live; Render was disabled and nothing replaces it yet. `docker-compose.prod.yml` + the CI `deploy` job are ready; needs a provisioned VPS + `VPS_HOST`/`VPS_SSH_KEY` secrets to actually deploy |
 | 1b | API skeleton | **done** — `/api/v1` prefix, `/health` + `/health/deep`, `docker-compose.yml`, `drizzle.config.ts`, throttle tiers defined |
 | 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **not started** |
-| 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | partly — CI workflow exists (lint → migrate → unit → e2e → build → docker build); RLS harness and a timed restore drill are still missing, and **Render must still be switched off auto-deploy** so the green run is what gates a release |
+| 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | partly — CI workflow exists (lint → migrate → unit → e2e → build → docker build → guarded VPS deploy); RLS harness and a timed restore drill are still missing. The "green run gates the release" property that Render's auto-deploy undermined is now true by construction — the CI `deploy` job *is* the only deploy path |
 
 **Do not start Phase 2 until 1c and 1d are done**, and read `PLATFORM_SETUP.md`'s
 "Exit criteria — when Phase 1 is actually done". Phase 2 consumes both: the RLS harness is what

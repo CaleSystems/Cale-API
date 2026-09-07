@@ -1,0 +1,30 @@
+# Production compose for the flat-fee VPS replacing Render (2026-09-07).
+#
+# Runs only the API container — Postgres is Neon (managed, off-box) and
+# stays that way; this file exists to run `cale-api` itself, not a database.
+#
+# Usage on the box:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Required env (put these in a `.env` file next to this compose file on the
+# VPS, NOT committed — see .env.example):
+#   DATABASE_URL   Neon connection string
+#   SENTRY_DSN     optional, unused by code yet
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

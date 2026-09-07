@@ -44,3 +44,40 @@ jobs:
       - run: npm run test:e2e
       - run: npm run build
       - run: docker build -t cale-api:${{ github.sha }} .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Render's auto-deploy is gone (2026-09-07) — this replaces it. Guarded
+      # on secret presence rather than failing outright: the VPS this deploys
+      # to doesn't exist yet, and a red required check would block every PR
+      # in the meantime. Once VPS_HOST/VPS_SSH_KEY are set as repo secrets,
+      # this step starts actually deploying with no other change needed.
+      - name: Check deploy secrets are configured
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.VPS_HOST }}" ] && [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VPS_HOST/VPS_SSH_KEY not set yet — skipping deploy. See PLATFORM_SETUP.md 'Hosting' for setup."
+          fi
+
+      - name: Deploy to VPS
+        if: steps.secrets.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER || 'deploy' }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/cale-api
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose -f docker-compose.prod.yml up -d --build
+            docker image prune -f
