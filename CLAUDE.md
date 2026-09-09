@@ -48,23 +48,57 @@ the local folder is still named `POS`, that hasn't been renamed to match) and th
 | Object storage | Cloudflare R2 via `@aws-sdk/client-s3` (bucket `cale-storage` created, not yet wired into code) |
 | Error tracking | Sentry project `cale-api` created, DSN in `.env`/`.env.example` as `SENTRY_DSN` — **SDK not installed/wired yet** |
 
+## Repo layout — pnpm workspace + Turborepo (2026-09-09)
+
+This became a monorepo when Phase 1c's first item landed. Root-level commands run across
+every workspace member via Turborepo; app-specific commands still run from `apps/api/`.
+
+```
+pnpm-workspace.yaml   # apps/*, packages/*
+turbo.json            # build/lint/test pipeline
+package.json          # root — "pnpm run build|lint|test" = turbo run <task>
+apps/
+  api/                # the NestJS app — everything that used to be at repo root
+packages/
+  contracts/          # @cale/contracts — Zod schemas + TS types, shared with clients.
+                       # First (only, so far) contract: the /health and /health/deep
+                       # response shapes, lifted from apps/api/src/app.controller.ts
+                       # and app.service.ts. Not yet imported by apps/api itself.
+```
+
+**What's still npm, deliberately:** `apps/api` keeps its own `package.json` +
+`package-lock.json` and its Docker/CI build still runs plain `npm ci` scoped to that
+directory — it doesn't consume `@cale/contracts` yet, so there's no cross-package
+dependency to justify moving its Docker build onto pnpm. That's the next trigger: once
+`apps/api` actually imports from `packages/contracts` (or a second app exists), the
+Dockerfile needs to become workspace-aware (root-context `pnpm install` + `pnpm --filter`
+build) instead of installing standalone. Don't do that migration speculatively before
+there's a real cross-package import — the two lockfiles are redundant but harmless in the
+meantime.
+
 ## Commands
 
 ```bash
-npm install
+# From the repo root — runs across every workspace member (apps/api + packages/*)
+pnpm install
+pnpm run build
+pnpm run lint
+pnpm run test
+
+# From apps/api/ — app-specific, not covered by the root turbo pipeline
+cd apps/api
 npm run start:dev   # local dev server
-npm run build        # production build
-npm test              # unit tests (Jest)
-npm run test:e2e     # e2e tests (Nest + supertest)
-npm run lint           # ESLint
+npm run test:e2e    # e2e tests (Nest + supertest)
 ```
 
-`DATABASE_URL` (Neon connection string) must be set in `.env` — copy `.env.example` and fill it in, or these commands (and `GET /health`) will fail/return `db: down`. See `.env.example` for `SENTRY_DSN` too (unused by code today).
+`DATABASE_URL` (Neon connection string) must be set in `apps/api/.env` — copy
+`apps/api/.env.example` and fill it in, or these commands (and `GET /health`) will
+fail/return `db: down`. See the same file for `SENTRY_DSN` too (unused by code today).
 
 ## Architecture
 
 ```
-src/
+apps/api/src/
   identity/     # staff, orgs, branches, RBAC, auth
   catalog/      # products, pricing, promotions
   commerce/     # orders, sales, payments
@@ -92,7 +126,7 @@ old version could be marked complete while none of its real deliverables existed
 |---|---|---|
 | 1a | Accounts & deploy surface | **partly undone (2026-09-07)** — Neon, R2, Sentry still live; Render was disabled and nothing replaces it yet. `docker-compose.prod.yml` + the CI `deploy` job are ready; needs a provisioned VPS + `VPS_HOST`/`VPS_SSH_KEY` secrets to actually deploy |
 | 1b | API skeleton | **done** — `/api/v1` prefix, `/health` + `/health/deep`, `docker-compose.yml`, `drizzle.config.ts`, throttle tiers defined |
-| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **not started** |
+| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **started (2026-09-09)** — pnpm workspace + Turborepo scaffolded (`apps/api`, `packages/contracts`), `@cale/contracts` has one real schema pair (health/deep-health, mirrored from `apps/api`, not yet imported by it). `@cale/offline`, `@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway all still not started |
 | 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | partly — CI workflow exists (lint → migrate → unit → e2e → build → docker build → guarded VPS deploy); RLS harness and a timed restore drill are still missing. The "green run gates the release" property that Render's auto-deploy undermined is now true by construction — the CI `deploy` job *is* the only deploy path |
 
 **Do not start Phase 2 until 1c and 1d are done**, and read `PLATFORM_SETUP.md`'s

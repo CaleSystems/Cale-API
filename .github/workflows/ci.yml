@@ -20,19 +20,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
-      - run: npm ci
-      - run: npm run lint
+      # Runs across the whole pnpm/Turborepo workspace (apps/api + packages/*),
+      # not just the API app — added when the monorepo scaffold (Phase 1c) landed.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
 
       # Guarded until a Drizzle schema exists — drizzle-kit fails on an empty
       # migrations folder, and a red CI nobody can fix gets ignored, which
       # defeats the point of gating deploys on it. Remove the guard once the
       # first module schema lands in Phase 2.
       - name: Run migrations
+        working-directory: apps/api
         run: |
           if ls drizzle/*.sql >/dev/null 2>&1; then
             npx drizzle-kit migrate
@@ -40,10 +44,10 @@ jobs:
             echo "No Drizzle migrations yet — skipping."
           fi
 
-      - run: npm test
-      - run: npm run test:e2e
-      - run: npm run build
-      - run: docker build -t cale-api:${{ github.sha }} .
+      - run: pnpm run test
+      - run: pnpm --filter cale-api run test:e2e
+      - run: pnpm run build
+      - run: docker build -f apps/api/Dockerfile -t cale-api:${{ github.sha }} apps/api
 
   deploy:
     needs: build
@@ -79,5 +83,6 @@ jobs:
             cd ~/cale-api
             git fetch origin main
             git reset --hard origin/main
+            cd apps/api
             docker compose -f docker-compose.prod.yml up -d --build
             docker image prune -f
