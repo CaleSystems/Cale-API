@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
-**Status (2026-08-28): infra live, no domain code yet.** Module folders (`identity`, `catalog`, `commerce`, `inventory`, `ops`, `platform`) are still empty Nest modules — no schema, no auth, no domain endpoints. What *is* real: the app is deployed and reachable, with a live DB connection and a working health check. Don't assume any domain logic exists — check actual module contents before relying on this doc's description of intended shape.
+**Status (2026-08-28, partially superseded 2026-09-09): infra live, almost no domain code yet.** Module folders `catalog`, `commerce`, `inventory`, `ops`, `platform` are still empty Nest modules — no schema, no auth, no domain endpoints. `identity` is the one exception: it has a Drizzle schema (5 tables, live on Neon `production`) but still no repository/service/auth code — see the Phase 1 table below for exactly what that does and doesn't cover. Don't assume any domain logic exists beyond that; check actual module contents before relying on this doc's description of intended shape.
 
 **Repo location (2026-08-28):** this repo moved from `github.com/Xeazhar/calesystems-api`
 to `github.com/CaleSystems/Cale-API` — repos now live under the `CaleSystems` GitHub
@@ -37,8 +37,8 @@ the local folder is still named `POS`, that hasn't been renamed to match) and th
 | Framework | NestJS + TypeScript |
 | HTTP adapter | Fastify (wired in `main.ts`, swapped from the CLI's default Express) |
 | API | REST at `/api/v1` (`setGlobalPrefix` in `src/bootstrap.ts`; `/health` and `/health/deep` are deliberately excluded so Render's probe keeps working), OpenAPI/Swagger (`@nestjs/swagger` installed, not yet wired) |
-| Database | Standalone PostgreSQL, schemas per domain, hosted on Neon — **provisioned and connected**, no schema/tables beyond Neon's defaults yet |
-| ORM | Drizzle (`drizzle-orm` + `drizzle-kit` installed, no schema written yet — current DB access is a raw `pg.Pool` for the health check only, see `src/db/pg-pool.provider.ts`) |
+| Database | Standalone PostgreSQL, schemas per domain, hosted on Neon — **provisioned and connected**; first real tables landed 2026-09-09 (Identity's 5 tables, see Phase 1 table below) |
+| ORM | Drizzle (`drizzle-orm` + `drizzle-kit`) — `apps/api/src/identity/identity.schema.ts` is the first schema file; DB access outside the health check now goes through `src/db/drizzle.provider.ts` (`DRIZZLE_DB`, wraps the same `PG_POOL`), not raw `pg.Pool` directly |
 | Auth | In-house — `@nestjs/passport` + `@nestjs/jwt` wrapping argon2id hashing, Postgres-tracked sessions (not yet implemented) |
 | Validation | `class-validator` + `class-transformer`, global `ValidationPipe({ whitelist: true, transform: true })` — **wired** in `main.ts` |
 | Rate limiting | `@nestjs/throttler`, global `APP_GUARD` (60 req/min) as the floor — **wired** in `app.module.ts`. Stricter tiers for auth (10/min) and sync (120/min) are defined in `src/throttle.tiers.ts` and applied per-route with `@Throttle(...)`; no route uses them yet because no auth/sync routes exist |
@@ -126,7 +126,7 @@ old version could be marked complete while none of its real deliverables existed
 |---|---|---|
 | 1a | Accounts & deploy surface | **partly undone (2026-09-07)** — Neon, R2, Sentry still live; Render was disabled and nothing replaces it yet. `docker-compose.prod.yml` + the CI `deploy` job are ready; needs a provisioned VPS + `VPS_HOST`/`VPS_SSH_KEY` secrets to actually deploy |
 | 1b | API skeleton | **done** — `/api/v1` prefix, `/health` + `/health/deep`, `docker-compose.yml`, `drizzle.config.ts`, throttle tiers defined |
-| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **started (2026-09-09)** — pnpm workspace + Turborepo scaffolded (`apps/api`, `packages/contracts`), `@cale/contracts` has one real schema pair (health/deep-health, mirrored from `apps/api`, not yet imported by it). `@cale/offline`, `@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway all still not started |
+| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **started (2026-09-09)** — pnpm workspace + Turborepo scaffolded (`apps/api`, `packages/contracts`), `@cale/contracts` has one real schema pair (health/deep-health, mirrored from `apps/api`, not yet imported by it). **Identity module: schema only, done same day** — `organizations`/`branches`/`staff`/`staff_assignments`/`device_registrations` (Drizzle, D3's temporal tables), migrated onto the real Neon `production` branch and verified live; no repository/service/auth code yet. `@cale/offline`, `@cale/ui`, FIX-3 interceptor, outbox relay, WebSocket gateway all still not started |
 | 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | partly — CI workflow exists (lint → migrate → unit → e2e → build → docker build → guarded VPS deploy); RLS harness and a timed restore drill are still missing. The "green run gates the release" property that Render's auto-deploy undermined is now true by construction — the CI `deploy` job *is* the only deploy path |
 
 **Do not start Phase 2 until 1c and 1d are done**, and read `PLATFORM_SETUP.md`'s
