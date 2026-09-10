@@ -1,7 +1,11 @@
 # Production compose for the flat-fee VPS replacing Render (2026-09-07).
 #
-# Runs only the API container — Postgres is Neon (managed, off-box) and
-# stays that way; this file exists to run `cale-api` itself, not a database.
+# Two services from the one image (architecture doc §2), differing only by
+# ROLE: `api` serves POS traffic; `worker` runs OutboxRelayService's polling
+# consumers (FIX-1/FIX-5 — "the web service must never accidentally pick up
+# jobs"). Both always-on, so a heavy background job never starves live
+# sales traffic. Postgres is Neon (managed, off-box) — this file only runs
+# cale-api itself.
 #
 # Usage on the box:
 #   docker compose -f docker-compose.prod.yml up -d --build
@@ -24,6 +28,28 @@ services:
       - .env
     environment:
       NODE_ENV: production
+      ROLE: web
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    # No `ports:` — this process never serves POS traffic, only the outbox
+    # relay's background polling. Its own /health stays reachable inside the
+    # compose network for the healthcheck below, just not published to the
+    # host.
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      ROLE: worker
     healthcheck:
       test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s

@@ -215,6 +215,9 @@ importers:
       '@typescript-eslint/parser':
         specifier: ^8.0.0
         version: 8.70.0(eslint@8.57.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
+      cross-env:
+        specifier: ^10.1.0
+        version: 10.1.0
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10

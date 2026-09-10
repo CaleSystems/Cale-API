@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
-**Status (2026-08-28, partially superseded 2026-09-10): infra live, Identity has real auth now, the FIX-3 interceptor is wired globally, everything else still empty.** Module folders `catalog`, `commerce`, `inventory`, `ops`, `platform` are still empty Nest modules — no schema, no domain endpoints. `identity` is the one exception: 6 tables live on Neon `production` (the original 5 plus `sessions`, added 2026-09-10), and it now has a repository layer plus a working `AuthController` (`POST /api/v1/auth/{login,refresh,logout}` — argon2id PIN verification, JWT access/refresh, rotating refresh tokens with replay detection via `IdentityRepository`/`sessions`). `db/tenant-context.interceptor.ts` (`TenantContextInterceptor`) is registered globally in `app.module.ts` and opens a request-scoped transaction + `SET LOCAL`-equivalent context (`app.current_branch_id`/`app.current_staff_id`/`app.current_role`) for every authenticated route, but no business module has a controller yet, so nothing actually reads that context through RLS — it's infra ahead of Phase 2. Still not built in Identity: device tokens (D3) and the PBKDF2 offline-verifier port — see the Phase 1 table below. Don't assume any domain logic exists beyond that; check actual module contents before relying on this doc's description of intended shape.
+**Status (2026-08-28, partially superseded 2026-09-10): infra live, Identity has real auth now, the FIX-3 interceptor is wired globally, `platform` has a working outbox relay, `catalog`/`commerce`/`inventory`/`ops` still empty.** `identity` has 6 tables live on Neon `production` (the original 5 plus `sessions`, added 2026-09-10), a repository layer, and a working `AuthController` (`POST /api/v1/auth/{login,refresh,logout}` — argon2id PIN verification, JWT access/refresh, rotating refresh tokens with replay detection via `IdentityRepository`/`sessions`). `db/tenant-context.interceptor.ts` (`TenantContextInterceptor`) is registered globally in `app.module.ts` and opens a request-scoped transaction + `SET LOCAL`-equivalent context (`app.current_branch_id`/`app.current_staff_id`/`app.current_role`) for every authenticated route, but no business module has a controller yet, so nothing actually reads that context through RLS — it's infra ahead of Phase 2. `platform` has FIX-1's outbox relay (`OutboxService`/`OutboxRelayService`/`PgBossOutboxDispatcher`) — see "Repo layout" below for detail; FIX-2's WebSocket gateway is not started. Still not built in Identity: device tokens (D3) and the PBKDF2 offline-verifier port — see the Phase 1 table below. Don't assume any domain logic exists beyond that; check actual module contents before relying on this doc's description of intended shape.
 
 **Repo location (2026-08-28):** this repo moved from `github.com/Xeazhar/calesystems-api`
 to `github.com/CaleSystems/Cale-API` — repos now live under the `CaleSystems` GitHub
@@ -105,6 +105,54 @@ was never committed, and `ConfigModule.forRoot({ isGlobal: true })` doesn't requ
 `.env` file to be present at runtime — `docker-compose.prod.yml`'s `env_file:` injects
 real process env vars directly, so excluding `.env`/`.env.example` from the image doesn't
 break boot.
+
+**FIX-1 outbox relay (2026-09-10).** `platform.schema.ts` adds `outbox`/`outbox_dead_letter`
+(plain `pgTable`, no Postgres schema namespace — same convention `identity.schema.ts`
+already uses). `OutboxService.enqueue(db, event)` is the producer-side call any future
+business module makes inside its own transaction — no module calls it yet, since none has
+a controller. `OutboxRelayService` polls every 3s via a plain `setInterval`, not pg-boss's
+`schedule()` (that's cron-based, a coarser grain than FIX-1's 2-5s target); it claims a
+batch with `FOR UPDATE SKIP LOCKED` inside one transaction and dispatches each row through
+`PgBossOutboxDispatcher`, which auto-creates the pg-boss queue for an event type on first
+use rather than pre-declaring every future type. Runs only under `ROLE=worker` (FIX-5) —
+`OutboxRelayService.onModuleInit()` checks this before calling `boss.start()`, so the web
+service never opens pg-boss's management connection at all. `docker-compose.prod.yml` now
+runs two services (`api`/`ROLE=web`, `worker`/`ROLE=worker`) from the one image, per the
+architecture doc's "two services on the host, not one."
+
+Two real bugs, not hypothetical, both caught before the first commit:
+1. **pg-boss@12 is ESM-only** (`"type": "module"`), while this app compiles to CommonJS. A
+   plain `import`/`require('pg-boss')` throws `ERR_REQUIRE_ESM` at runtime, and TypeScript
+   down-levels an ordinary `import()` to `require()` under a commonjs module target too, so
+   that doesn't dodge it either. `pg-boss.provider.ts` routes the import through
+   `new Function('return import("pg-boss")')` — a hardcoded literal, no interpolation — to
+   hide it from TS's downlevel transform, so it's a real dynamic `import()` at runtime.
+   Verified with a standalone `node -e` smoke test before wiring it into Nest. Everywhere
+   else the class is only needed as a *type* (`outbox-dispatcher.ts`, `outbox-relay.service.ts`)
+   uses `import type { PgBoss } from 'pg-boss'`, which TypeScript erases entirely — never a
+   runtime `require()` call.
+2. Jest's own VM sandbox additionally can't execute a dynamic `import()` without
+   `NODE_OPTIONS=--experimental-vm-modules` — a separate restriction from the TS downlevel
+   issue above, only visible once the e2e suite actually ran. `apps/api/package.json`'s
+   `test:e2e` script now wraps the flag via `cross-env` (added as a devDependency) so it
+   works the same on Windows and Linux/CI, without touching the plain `test`/`start*`
+   scripts (unit tests never construct `PgBoss`, so they never hit this).
+
+A third gap surfaced only because a *separate* test exercised the real dispatcher: the
+relay's own e2e suite (`outbox-relay.e2e-spec.ts`) stubs `OUTBOX_DISPATCHER` entirely, so it
+never calls `boss.start()` — nothing did, anywhere, until `outbox-dispatcher.e2e-spec.ts`
+was written specifically to exercise `PgBossOutboxDispatcher` for real. Fixed by moving the
+`boss.start()`/`boss.stop()` lifecycle into `OutboxRelayService.onModuleInit()`/
+`onModuleDestroy()`, gated by the same `ROLE=worker` check. `GET /health/deep`'s `outbox`
+check was also a stale hardcoded `not_configured` from before this landed — replaced with a
+real probe (pending + dead-lettered counts) in `app.service.ts`, per that file's own
+"replace each with a real probe as it lands" comment.
+
+Verified end-to-end against the real Neon DB (`outbox-relay.e2e-spec.ts`,
+`outbox-dispatcher.e2e-spec.ts`): dispatch-and-mark-processed, a future `retry_after` row
+staying unclaimed, exponential backoff without dead-lettering early, dead-lettering past the
+retry ceiling, two concurrent pollers not double-dispatching the same row, and the real
+pg-boss `send`/`createQueue`/`getQueue` path including the create-on-first-use fallback.
 
 ## Commands
 

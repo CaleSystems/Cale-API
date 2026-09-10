@@ -61,5 +61,7 @@ describe('AppController (e2e)', () => {
     expect(typeof res.body.checks.database.latencyMs).toBe('number');
     // Unwired dependencies are reported honestly, and do not fail the check.
     expect(res.body.checks.storage.status).toBe('not_configured');
+    // outbox is a real probe now (FIX-1) — the table exists on the real DB.
+    expect(res.body.checks.outbox.status).toBe('up');
   });
 });
