@@ -87,6 +87,25 @@ updated to match: `ci.yml`'s `docker build -f apps/api/Dockerfile .` (context `.
 it's what stops the VPS's real `apps/api/.env` from ever reaching a build layer now that
 the context is the whole repo.
 
+**Security check on this migration (2026-09-10), one real regression caught and fixed:**
+`pnpm --prod deploy` bundles a package's *entire* directory by default, not just its build
+output — a first pass shipped `apps/api`'s full `src/`, `test/` (the e2e suites), eslint/
+prettier/tsconfig configs, `docker-compose*.yml`, and even `.env.example` into the
+"production" image, silently breaking the old Dockerfile's stated promise ("ships only
+production deps + compiled output"). Fixed with a `"files": ["dist"]` allowlist on both
+`apps/api/package.json` and `packages/contracts/package.json` — verified by re-running
+`pnpm --filter cale-api --prod deploy` locally and confirming the output is only `dist/`,
+`node_modules/`, and `package.json` (plus `README.md`/lockfile, which `npm`/`pnpm` pack
+always includes regardless of `files` — harmless). Also added `USER node` to the runtime
+stage — the image had no `USER` directive before or after this migration (a pre-existing
+gap, not something this change introduced, but worth closing while rewriting the file);
+`node:22-alpine` ships that unprivileged user already, no custom user needed. Confirmed
+separately: `apps/api/.env` (real Neon connection string + JWT secrets) is gitignored and
+was never committed, and `ConfigModule.forRoot({ isGlobal: true })` doesn't require a
+`.env` file to be present at runtime — `docker-compose.prod.yml`'s `env_file:` injects
+real process env vars directly, so excluding `.env`/`.env.example` from the image doesn't
+break boot.
+
 ## Commands
 
 ```bash
