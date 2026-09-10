@@ -1,0 +1,8 @@
+# Applies to any docker build using the repo root as context (apps/api's
+# Dockerfile now does, since it needs packages/contracts in scope too).
+# .env must never reach a build context — see docker-compose.prod.yml's
+# "Required env" comment: the VPS keeps real secrets in apps/api/.env.
+**/node_modules
+**/dist
+**/.env
+.git

@@ -47,7 +47,9 @@ jobs:
       - run: pnpm run test
       - run: pnpm --filter cale-api run test:e2e
       - run: pnpm run build
-      - run: docker build -f apps/api/Dockerfile -t cale-api:${{ github.sha }} apps/api
+      # Context is the repo root, not apps/api: the Dockerfile needs
+      # packages/contracts too, now that apps/api imports @cale/contracts.
+      - run: docker build -f apps/api/Dockerfile -t cale-api:${{ github.sha }} .
 
   deploy:
     needs: build

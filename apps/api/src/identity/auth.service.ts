@@ -1,3 +1,4 @@
+import type { AuthTokens } from '@cale/contracts';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -29,12 +30,6 @@ interface RefreshTokenPayload {
   // actually distinguishable from the new one, silently defeating rotation.
   nonce: string;
   type: 'refresh';
-}
-
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
 }
 
 @Injectable()

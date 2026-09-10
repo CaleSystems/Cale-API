@@ -1,6 +1,10 @@
+import type { LoginRequest, RefreshRequest } from '@cale/contracts';
 import { IsString, IsUUID, Length } from 'class-validator';
 
-export class LoginDto {
+// `implements` pins these to @cale/contracts' shape at compile time — a field
+// added, renamed, or retyped here without updating the shared contract (or
+// vice versa) fails the build instead of silently drifting.
+export class LoginDto implements LoginRequest {
   @IsUUID()
   staffId: string;
 
@@ -12,7 +16,7 @@ export class LoginDto {
   pin: string;
 }
 
-export class RefreshDto {
+export class RefreshDto implements RefreshRequest {
   @IsString()
   refreshToken: string;
 }

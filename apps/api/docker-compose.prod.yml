@@ -13,8 +13,10 @@
 services:
   api:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # Repo root — the Dockerfile needs packages/contracts too, since
+      # apps/api imports @cale/contracts as a workspace dependency.
+      context: ../..
+      dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     ports:
       - '3000:3000'

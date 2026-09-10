@@ -61,20 +61,31 @@ apps/
   api/                # the NestJS app — everything that used to be at repo root
 packages/
   contracts/          # @cale/contracts — Zod schemas + TS types, shared with clients.
-                       # First (only, so far) contract: the /health and /health/deep
-                       # response shapes, lifted from apps/api/src/app.controller.ts
-                       # and app.service.ts. Not yet imported by apps/api itself.
+                       # health.ts: /health and /health/deep response shapes, lifted
+                       # from apps/api/src/app.controller.ts and app.service.ts.
+                       # auth.ts: LoginRequest/RefreshRequest/AuthTokens, mirroring
+                       # POST /auth/login|refresh|logout. Both are imported by
+                       # apps/api itself now (identity/auth.dto.ts's LoginDto/RefreshDto
+                       # `implements` the contract types; auth.service.ts's AuthTokens
+                       # return type comes straight from the package) — the first real
+                       # cross-package consumption, not just a mirrored shape sitting
+                       # unused.
 ```
 
-**What's still npm, deliberately:** `apps/api` keeps its own `package.json` +
-`package-lock.json` and its Docker/CI build still runs plain `npm ci` scoped to that
-directory — it doesn't consume `@cale/contracts` yet, so there's no cross-package
-dependency to justify moving its Docker build onto pnpm. That's the next trigger: once
-`apps/api` actually imports from `packages/contracts` (or a second app exists), the
-Dockerfile needs to become workspace-aware (root-context `pnpm install` + `pnpm --filter`
-build) instead of installing standalone. Don't do that migration speculatively before
-there's a real cross-package import — the two lockfiles are redundant but harmless in the
-meantime.
+**Docker/CI build is now pnpm-workspace-aware (2026-09-10).** `apps/api` importing
+`@cale/contracts` (above) was the documented trigger for this: `apps/api/Dockerfile` no
+longer runs a standalone `npm ci` scoped to that directory (which can't resolve a
+`workspace:*` dependency or see `packages/contracts` at all) — it now builds from the
+**repo root** as context (`pnpm install --frozen-lockfile` at the root, then
+`pnpm --filter cale-api --prod deploy /deploy` to bundle the app plus its resolved
+production deps, `@cale/contracts` included, into one self-contained folder — the
+pnpm-recommended pattern for a lean monorepo image). `apps/api/package-lock.json` is
+gone; the workspace's `pnpm-lock.yaml` is now the only lockfile. Both callers were
+updated to match: `ci.yml`'s `docker build -f apps/api/Dockerfile .` (context `.`, not
+`apps/api`) and `docker-compose.prod.yml`'s `build.context: ../..`. A root-level
+`.dockerignore` (`**/node_modules`, `**/dist`, `**/.env`, `.git`) is now load-bearing —
+it's what stops the VPS's real `apps/api/.env` from ever reaching a build layer now that
+the context is the whole repo.
 
 ## Commands
 

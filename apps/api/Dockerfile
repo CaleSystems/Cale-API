@@ -1,17 +1,31 @@
-# Multi-stage build so the runtime image ships only production deps + compiled output.
-FROM node:22-alpine AS build
+# Multi-stage, pnpm-workspace-aware build. apps/api imports @cale/contracts
+# as a workspace dependency (PLATFORM_SETUP.md 1c), so the build context must
+# be the repo root, not this directory — see docker-compose.prod.yml's
+# `context: ../..` and ci.yml's `docker build -f apps/api/Dockerfile .`.
+#
+# Keep this pnpm version in sync with the root package.json's "packageManager".
+FROM node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+
+FROM base AS build
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY apps/api/package.json apps/api/package.json
+RUN pnpm install --frozen-lockfile
+COPY packages/contracts packages/contracts
+COPY apps/api apps/api
+RUN pnpm run build
+# Resolves cale-api's production deps for real (including the built
+# @cale/contracts, copied in rather than left as a workspace symlink) into
+# one self-contained folder — the pnpm-recommended pattern for a lean
+# monorepo Docker image.
+RUN pnpm --filter cale-api --prod deploy /deploy
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-COPY --from=build /app/dist ./dist
+COPY --from=build /deploy .
 
 EXPOSE 3000
 CMD ["node", "dist/main"]
