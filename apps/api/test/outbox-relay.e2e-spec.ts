@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { AppModule } from '../src/app.module';
 import { DRIZZLE_DB } from '../src/db/drizzle.provider';
@@ -23,6 +23,11 @@ describe('OutboxRelayService (e2e)', () => {
   let db: NodePgDatabase;
   let relay: OutboxRelayService;
   let dispatcher: RecordingDispatcher;
+  // This suite hits the real Neon DB (see below) — every inserted row must
+  // be cleaned up, or it accumulates in production forever. Found the hard
+  // way: a 2026-09-10 restore drill turned up 49 stray outbox rows and 7
+  // dead-lettered ones left by past runs of exactly this suite.
+  const insertedIds: number[] = [];
 
   class RecordingDispatcher implements OutboxEventDispatcher {
     calls: OutboxEvent[] = [];
@@ -47,6 +52,12 @@ describe('OutboxRelayService (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (insertedIds.length > 0) {
+      await db
+        .delete(outboxDeadLetter)
+        .where(inArray(outboxDeadLetter.outboxId, insertedIds));
+      await db.delete(outbox).where(inArray(outbox.id, insertedIds));
+    }
     await moduleFixture.close();
   });
 
@@ -68,6 +79,7 @@ describe('OutboxRelayService (e2e)', () => {
         ...overrides,
       })
       .returning();
+    insertedIds.push(row.id);
     return row;
   }
 
