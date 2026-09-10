@@ -4,7 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
+**Platform migration reversed (2026-09-10): Supabase stays as the foundation.** This
+repo's stated purpose below ("replacing Supabase") is **superseded**. Decision: Supabase
+(Postgres + Auth + Realtime + Storage) remains the foundation for CalePOS and for the
+shared backend eventually serving the wider 8-app platform. This repo's role — if it
+continues at all — shifts from "full Supabase replacement" to "thin layer over Supabase,"
+not yet decided which. All work already built here (Identity auth, FIX-1 outbox relay,
+FIX-3 tenant interceptor, Drizzle schema — see "Status" below) is **paused pending that
+decision, not deleted**. Do not add new business-module code under the old
+full-replacement assumption until it's resolved. See `../Cale-POS/CLAUDE.md` for the
+same notice on the frontend side.
+
+`cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend *(superseded framing — see notice above)*. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
 **Status (2026-08-28, partially superseded 2026-09-10): infra live, Identity has real auth now, the FIX-3 interceptor is wired globally, `platform` has a working outbox relay, `catalog`/`commerce`/`inventory`/`ops` still empty.** `identity` has 6 tables live on Neon `production` (the original 5 plus `sessions`, added 2026-09-10), a repository layer, and a working `AuthController` (`POST /api/v1/auth/{login,refresh,logout}` — argon2id PIN verification, JWT access/refresh, rotating refresh tokens with replay detection via `IdentityRepository`/`sessions`). `db/tenant-context.interceptor.ts` (`TenantContextInterceptor`) is registered globally in `app.module.ts` and opens a request-scoped transaction + `SET LOCAL`-equivalent context (`app.current_branch_id`/`app.current_staff_id`/`app.current_role`) for every authenticated route, but no business module has a controller yet, so nothing actually reads that context through RLS — it's infra ahead of Phase 2. `platform` has FIX-1's outbox relay (`OutboxService`/`OutboxRelayService`/`PgBossOutboxDispatcher`) — see "Repo layout" below for detail; FIX-2's WebSocket gateway is not started. Still not built in Identity: device tokens (D3) and the PBKDF2 offline-verifier port — see the Phase 1 table below. Don't assume any domain logic exists beyond that; check actual module contents before relying on this doc's description of intended shape.
 
