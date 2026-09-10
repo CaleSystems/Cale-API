@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
-**Status (2026-08-28, partially superseded 2026-09-09): infra live, almost no domain code yet.** Module folders `catalog`, `commerce`, `inventory`, `ops`, `platform` are still empty Nest modules — no schema, no auth, no domain endpoints. `identity` is the one exception: it has a Drizzle schema (5 tables, live on Neon `production`) but still no repository/service/auth code — see the Phase 1 table below for exactly what that does and doesn't cover. Don't assume any domain logic exists beyond that; check actual module contents before relying on this doc's description of intended shape.
+**Status (2026-08-28, partially superseded 2026-09-10): infra live, Identity has real auth now, everything else still empty.** Module folders `catalog`, `commerce`, `inventory`, `ops`, `platform` are still empty Nest modules — no schema, no auth, no domain endpoints. `identity` is the one exception: 6 tables live on Neon `production` (the original 5 plus `sessions`, added 2026-09-10), and it now has a repository layer plus a working `AuthController` (`POST /api/v1/auth/{login,refresh,logout}` — argon2id PIN verification, JWT access/refresh, rotating refresh tokens with replay detection via `IdentityRepository`/`sessions`). Still not built in Identity: device tokens (D3), the PBKDF2 offline-verifier port, and the FIX-3 interceptor itself — see the Phase 1 table below. Don't assume any domain logic exists beyond that; check actual module contents before relying on this doc's description of intended shape.
 
 **Repo location (2026-08-28):** this repo moved from `github.com/Xeazhar/calesystems-api`
 to `github.com/CaleSystems/Cale-API` — repos now live under the `CaleSystems` GitHub
@@ -126,7 +126,7 @@ old version could be marked complete while none of its real deliverables existed
 |---|---|---|
 | 1a | Accounts & deploy surface | **partly undone (2026-09-07)** — Neon, R2, Sentry still live; Render was disabled and nothing replaces it yet. `docker-compose.prod.yml` + the CI `deploy` job are ready; needs a provisioned VPS + `VPS_HOST`/`VPS_SSH_KEY` secrets to actually deploy |
 | 1b | API skeleton | **done** — `/api/v1` prefix, `/health` + `/health/deep`, `docker-compose.yml`, `drizzle.config.ts`, throttle tiers defined |
-| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **started (2026-09-09)** — pnpm workspace + Turborepo scaffolded (`apps/api`, `packages/contracts`), `@cale/contracts` has one real schema pair (health/deep-health, mirrored from `apps/api`, not yet imported by it). **Identity module: schema only, done same day** — `organizations`/`branches`/`staff`/`staff_assignments`/`device_registrations` (Drizzle, D3's temporal tables), migrated onto the real Neon `production` branch and verified live; no repository/service/auth code yet. `@cale/offline`, `@cale/ui`, FIX-3 interceptor, outbox relay, WebSocket gateway all still not started |
+| 1c | Monorepo + `@cale/contracts`/`@cale/offline`/`@cale/ui`, identity module, FIX-3 interceptor, outbox relay, WebSocket gateway | **started (2026-09-09), identity auth added 2026-09-10** — pnpm workspace + Turborepo scaffolded (`apps/api`, `packages/contracts`), `@cale/contracts` has one real schema pair (health/deep-health, mirrored from `apps/api`, not yet imported by it). **Identity module** — `organizations`/`branches`/`staff`/`staff_assignments`/`device_registrations` (Drizzle, D3's temporal tables) plus `staff.pinHash` and a `sessions` table added 2026-09-10, all migrated onto the real Neon `production` branch and verified live. `IdentityRepository` + `AuthService`/`AuthController` now cover login/refresh/logout (argon2id + rotating JWT refresh tokens); still missing: device tokens (D3), the PBKDF2 offline-verifier port. `@cale/offline`, `@cale/ui`, FIX-3 interceptor, outbox relay, WebSocket gateway all still not started |
 | 1d | RLS test harness, tested backup/restore, `.github/workflows/ci.yml` | partly — CI workflow exists (lint → migrate → unit → e2e → build → docker build → guarded VPS deploy); RLS harness and a timed restore drill are still missing. The "green run gates the release" property that Render's auto-deploy undermined is now true by construction — the CI `deploy` job *is* the only deploy path |
 
 **Do not start Phase 2 until 1c and 1d are done**, and read `PLATFORM_SETUP.md`'s
@@ -143,6 +143,15 @@ must exist *before* `src/lib/api/` is ported — extracting it afterwards is a r
   widens the TypeScript rootDir, which moves the build output from `dist/main.js` to
   `dist/src/main.js` and breaks both the Dockerfile's `CMD` and `start:prod`. Any new root-level
   `.ts` file needs the same exclusion.
+
+**A trap found while doing Identity's auth (2026-09-10) — do not undo:** a rotated JWT refresh
+token must carry a per-issuance random value (`AuthService`'s `RefreshTokenPayload.nonce`), not
+just the session id as `jti`. Without it, two rotations signed within the same wall-clock second
+are byte-identical (HS256 is deterministic given the same header+payload+secret, and `iat`/`exp`
+only have 1-second resolution) — the "old" token isn't actually distinguishable from the new one,
+so replay detection silently does nothing. Caught by `test/auth.e2e-spec.ts` failing intermittently
+under fast local test runs, not by any assertion — if that test starts flaking again, check this
+first.
 
 Phase 2 — POS parity is then split into four shippable slices (2a identity+auth → 2b catalog/inventory reads → 2c commerce/fiscal → 2d ops/reporting), each ending in a rehearsal. Read `PLATFORM_SETUP.md` section 6 "Phase 2 — POS parity" in full before starting.
 
