@@ -61,6 +61,9 @@ export const staff = pgTable('staff', {
     .notNull()
     .references(() => organizations.id),
   fullName: text('full_name').notNull(),
+  // argon2id, per PLATFORM_SETUP.md's "three Supabase-specific replacements"
+  // — replaces Supabase's pgcrypto-encrypted login_pin.
+  pinHash: text('pin_hash').notNull(),
   // D3: dismissal-for-cause quarantines writes made under this staff member
   // after this timestamp — it does not delete or reject retroactively valid
   // history.
@@ -132,5 +135,35 @@ export const deviceRegistrations = pgTable(
     branchValidFromIdx: index(
       'device_registrations_branch_id_valid_from_idx',
     ).on(t.branchId, t.validFrom),
+  }),
+);
+
+// A staff session, scoped to one branch chosen at login (role for that
+// session is read off the staffAssignments row for that staff+branch, not
+// stored again here). refreshTokenHash is argon2id-hashed — the raw token
+// only ever exists in the client's hands, never at rest, so a DB leak alone
+// can't be replayed into a live session. Lookup is by session id (the JWT's
+// `jti`), not by scanning hashes.
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    staffId: uuid('staff_id')
+      .notNull()
+      .references(() => staff.id),
+    branchId: uuid('branch_id')
+      .notNull()
+      .references(() => branches.id),
+    refreshTokenHash: text('refresh_token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    staffIdx: index('sessions_staff_id_idx').on(t.staffId),
   }),
 );
