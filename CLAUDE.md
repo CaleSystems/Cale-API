@@ -4,16 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Platform migration reversed (2026-09-10): Supabase stays as the foundation.** This
-repo's stated purpose below ("replacing Supabase") is **superseded**. Decision: Supabase
-(Postgres + Auth + Realtime + Storage) remains the foundation for CalePOS and for the
-shared backend eventually serving the wider 8-app platform. This repo's role — if it
-continues at all — shifts from "full Supabase replacement" to "thin layer over Supabase,"
-not yet decided which. All work already built here (Identity auth, FIX-1 outbox relay,
-FIX-3 tenant interceptor, Drizzle schema — see "Status" below) is **paused pending that
-decision, not deleted**. Do not add new business-module code under the old
-full-replacement assumption until it's resolved. See `../Cale-POS/CLAUDE.md` for the
-same notice on the frontend side.
+**Repo dropped (2026-09-10): Supabase stays as the foundation, this repo is not needed.**
+This repo's stated purpose below ("replacing Supabase") is **superseded and settled**.
+Decision: Supabase (Postgres + Auth + Realtime + Storage) remains the foundation for
+CalePOS and for the wider 8-app platform. The follow-up question — full replacement vs.
+a thin coordination layer in front of Supabase — is now resolved too: **no coordination
+layer is needed.** Cale Kitchen, Cale Office, and Cale Customers (the current priority
+build, see `../Cale-POS/docs/superpowers/plans/2026-09-10-cale-kitchen-office-customers-build-plan.md`)
+are all specced to talk to Supabase directly — the same tables/RLS/RPCs/Realtime pattern
+CalePOS already uses — with no dependency on this repo. **This repo is archived.** All
+work already built here (Identity auth, FIX-1 outbox relay, FIX-3 tenant interceptor,
+Drizzle schema — see "Status" below) stays as reference/history; nothing new is built on
+it, and nothing elsewhere in the platform depends on it. See `../Cale-POS/CLAUDE.md` for
+the same notice on the frontend side. If a real cross-app coordination need surfaces
+later (once more apps are live), that's a fresh decision to make then, not a reason to
+resume this repo as-is.
 
 `cale-api` — the standalone NestJS backend for the Cale platform, replacing Supabase as CalePOS's backend *(superseded framing — see notice above)*. See `../POS/PLATFORM_SETUP.md` for the full migration plan (this repo is Phase 1 onward of that plan's "Build order," section 6) and the architecture review artifact it links for the decision-by-decision rationale: https://claude.ai/code/artifact/9a543290-9875-453f-ac06-e5c1047f0a36
 
