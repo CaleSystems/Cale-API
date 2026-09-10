@@ -12,8 +12,9 @@
  * `forRoot`: every throttler in that array applies to every route, so adding
  * an `auth` tier there would clamp the whole API to the auth limit.
  *
- * Nothing consumes these yet — there are no auth or sync routes. They exist so
- * the first one written picks the right tier instead of inheriting the floor.
+ * AUTH_THROTTLE is consumed by identity/auth.controller.ts. SYNC_THROTTLE has
+ * no consumer yet — there's no sync route — but exists so the first one
+ * written picks the right tier instead of inheriting the floor.
  */
 
 const MINUTE = 60_000;

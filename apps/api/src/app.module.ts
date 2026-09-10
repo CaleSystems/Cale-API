@@ -1,5 +1,5 @@
 import { Module, OnModuleDestroy, Inject } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { Pool } from 'pg';
@@ -7,6 +7,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PG_POOL } from './db/pg-pool.provider';
 import { DbModule } from './db/db.module';
+import { TenantContextInterceptor } from './db/tenant-context.interceptor';
 import { IdentityModule } from './identity/identity.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { CommerceModule } from './commerce/commerce.module';
@@ -27,7 +28,11 @@ import { PlatformModule } from './platform/platform.module';
     PlatformModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+  ],
 })
 export class AppModule implements OnModuleDestroy {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
