@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Always check `../Cale-POS/PLANS.md` first, every session.** It's the index of every active
+plan across the whole Cale platform (not just one repo) with a status on each — done, in
+progress, planned, or blocked. It's staged in `Cale-POS` temporarily; it belongs in its own
+`CaleSystems/Cale-Plans` repo, sibling to this one, once that repo exists (see that file for
+why it doesn't yet — same 403 blocker as `Cale-Office`).
+
 ## What this is
 
 **Repo dropped (2026-09-10): Supabase stays as the foundation, this repo is not needed.**
